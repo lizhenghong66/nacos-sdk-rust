@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .namespace("")
         .app_name("simple_app")
         .auth_username("nacos") // TODO You can choose not to enable auth
-        .auth_password("nacos") // TODO You can choose not to enable auth
+        .auth_password("123456") // TODO You can choose not to enable auth
         ;
 
     // ----------  Config  -------------

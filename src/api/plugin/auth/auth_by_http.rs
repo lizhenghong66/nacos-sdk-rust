@@ -1,5 +1,5 @@
 use rand::Rng;
-use std::ops::Add;
+use std::{ops::Add, cell::UnsafeCell};
 use tokio::time::{Duration, Instant};
 
 use crate::api::plugin::{AuthContext, AuthPlugin, LoginIdentityContext};
@@ -15,15 +15,18 @@ pub(crate) const TOKEN_TTL: &str = "tokenTtl";
 
 /// Http login AuthPlugin.
 pub struct HttpLoginAuthPlugin {
-    login_identity: LoginIdentityContext,
-    next_login_refresh: Instant,
+    login_identity: UnsafeCell<LoginIdentityContext>,
+    next_login_refresh: UnsafeCell<Instant>,
+    // login_identity: LoginIdentityContext,
+    // next_login_refresh: Instant,
 }
+unsafe impl Sync for HttpLoginAuthPlugin {}
 
 impl Default for HttpLoginAuthPlugin {
     fn default() -> Self {
         Self {
-            login_identity: LoginIdentityContext::default(),
-            next_login_refresh: Instant::now(),
+            login_identity: UnsafeCell::new(LoginIdentityContext::default()),
+            next_login_refresh: UnsafeCell::new(Instant::now()),
         }
     }
 }
@@ -31,11 +34,22 @@ impl Default for HttpLoginAuthPlugin {
 #[async_trait::async_trait]
 impl AuthPlugin for HttpLoginAuthPlugin {
     async fn login(&self, server_list: Vec<String>, auth_context: AuthContext) {
+    //async fn login(&self: &mut auth_by_http::HttpLoginAuthPlugin, server_list: Vec<String>, auth_context: AuthContext) { 
         let now_instant = Instant::now();
-        if now_instant.le(&self.next_login_refresh) {
-            tracing::debug!("Http login return because now_instant lte next_login_refresh.");
-            return;
+        unsafe {
+            #[warn(clippy::cast_ref_to_mut)]
+            // let mut_self: &mut HttpLoginAuthPlugin = &mut *(self as *const Self as *mut Self);
+            // if mut_self.next_login_refresh.get().le(&now_instant) {
+            if now_instant.le(&(*self.next_login_refresh.get())) {
+                tracing::debug!("Http login return because now_instant lte next_login_refresh.");
+                return;
+            }
+
         }
+        // if now_instant.le(&(*self.next_login_refresh.get())) {
+        //     tracing::debug!("Http login return because now_instant lte next_login_refresh.");
+        //     return;
+        // }
 
         let username = auth_context.params.get(USERNAME).unwrap().to_owned();
         let password = auth_context.params.get(PASSWORD).unwrap().to_owned();
@@ -90,16 +104,25 @@ impl AuthPlugin for HttpLoginAuthPlugin {
                 .add_context(ACCESS_TOKEN, login_response.access_token);
 
             unsafe {
-                #[warn(clippy::cast_ref_to_mut)]
-                let mut_self = &mut *(self as *const Self as *mut Self);
-                mut_self.next_login_refresh = Instant::now().add(Duration::from_secs(delay_sec));
-                mut_self.login_identity = new_login_identity;
+                //#[warn(clippy::cast_ref_to_mut)]
+                //let mut_self: &mut HttpLoginAuthPlugin = &mut *(self as *const Self as *mut Self);
+                let next_login_refresh = &mut *(self.next_login_refresh.get());
+                *next_login_refresh = now_instant.add(Duration::from_secs(delay_sec));
+                let login_identity = &mut *(self.login_identity.get());
+                *login_identity = new_login_identity;
+                // self.next_login_refresh = UnsafeCell::new(Instant::now().add(Duration::from_secs(delay_sec)));
+                // self.login_identity = UnsafeCell::new(new_login_identity);
             }
         }
     }
 
     fn get_login_identity(&self) -> LoginIdentityContext {
-        self.login_identity.to_owned()
+        unsafe {
+            // #[warn(clippy::cast_ref_to_mut)]
+            // let mut_self: &mut HttpLoginAuthPlugin = &mut *(self as *const Self as *mut Self);
+            (*self.login_identity.get()).clone()
+        }
+        //(*self.login_identity.get()).to_owned()
     }
 }
 
